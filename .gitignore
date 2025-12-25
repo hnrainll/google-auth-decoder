@@ -8,6 +8,27 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
+env/
+
+# IDE
 .DS_Store
 .idea/
+.vscode/
+*.swp
+*.swo
+
+# QR codes and sensitive data
 qrcodes/
+*-qrcodes/
+*.png
+*.jpg
+*.jpeg
+
+# Test files
+test_*.py
+*_test.py
+example_url.txt
+
+# UV
+uv.lock
