@@ -262,7 +262,7 @@ def generate_otpauth_url(account: Dict[str, Any]) -> str:
     return f"otpauth://{otp_type}/{encoded_label}?{query_string}"
 
 
-def decode_migration_data(binary_data: bytes) -> List[Dict[str, Any]]:
+def decode_migration_data(binary_data: bytes) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Decode the protobuf binary data and extract account information.
 
@@ -270,7 +270,7 @@ def decode_migration_data(binary_data: bytes) -> List[Dict[str, Any]]:
         binary_data: Protobuf-encoded binary data
 
     Returns:
-        List of account dictionaries
+        Tuple of (list of account dictionaries, metadata dictionary)
     """
     try:
         parser = ProtobufParser(binary_data)
@@ -296,7 +296,16 @@ def decode_migration_data(binary_data: bytes) -> List[Dict[str, Any]]:
 
         accounts.append(account)
 
-    return accounts
+    # Extract metadata
+    metadata = {
+        "version": payload.get('version', 0),
+        "batch_size": payload.get('batch_size', 0),
+        "batch_index": payload.get('batch_index', 0),
+        "batch_id": payload.get('batch_id', 0),
+        "accounts_in_batch": len(accounts)
+    }
+
+    return accounts, metadata
 
 
 def generate_qr_code(otpauth_url: str, output_path: Optional[Path] = None) -> Optional[str]:
@@ -400,13 +409,37 @@ Examples:
         default=Path("qrcodes"),
         help="Directory to save QR code images (default: ./qrcodes)"
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show debug information including batch details"
+    )
 
     args = parser.parse_args()
 
     try:
         # Parse and decode the migration URL
         binary_data = parse_migration_url(args.url)
-        accounts = decode_migration_data(binary_data)
+        accounts, metadata = decode_migration_data(binary_data)
+
+        # Show debug information if requested
+        if args.debug:
+            print("\n" + "="*80)
+            print("DEBUG INFORMATION")
+            print("="*80)
+            print(f"Batch Information:")
+            print(f"  Version:           {metadata['version']}")
+            print(f"  Total batches:     {metadata['batch_size']}")
+            print(f"  Current batch:     {metadata['batch_index'] + 1} of {metadata['batch_size']}")
+            print(f"  Batch ID:          {metadata['batch_id']}")
+            print(f"  Accounts in batch: {metadata['accounts_in_batch']}")
+
+            if metadata['batch_size'] > 1:
+                print(f"\n⚠️  WARNING: This is a multi-batch export!")
+                print(f"   You have batch {metadata['batch_index'] + 1} of {metadata['batch_size']} total batches.")
+                print(f"   Google Authenticator exported your {metadata['batch_size']} batches.")
+                print(f"   You need to scan and process ALL {metadata['batch_size']} QR codes to get all accounts.")
+            print("="*80 + "\n")
 
         if not accounts:
             print("No accounts found in the migration data.", file=sys.stderr)
@@ -434,7 +467,10 @@ Examples:
 
         if args.json:
             import json
-            output = []
+            output = {
+                "metadata": metadata,
+                "accounts": []
+            }
             for i, account in enumerate(accounts, 1):
                 entry = {
                     **account,
@@ -442,12 +478,21 @@ Examples:
                 }
                 if i in qr_files:
                     entry["qr_code_path"] = str(qr_files[i])
-                output.append(entry)
+                output["accounts"].append(entry)
             print(json.dumps(output, indent=2, ensure_ascii=False))
         else:
             # Pretty print the results
             print(f"\n{'='*80}")
-            print(f"Found {len(accounts)} account(s):")
+            print(f"Found {len(accounts)} account(s) in this batch:")
+
+            # Show batch warning if multi-batch
+            if metadata['batch_size'] > 1:
+                print(f"\n⚠️  WARNING: Multi-batch export detected!")
+                print(f"   Current batch: {metadata['batch_index'] + 1} of {metadata['batch_size']}")
+                print(f"   This URL contains only {len(accounts)} account(s).")
+                print(f"   You need to process ALL {metadata['batch_size']} QR codes to get all your accounts!")
+                print(f"   (Use --debug flag for more details)")
+
             print(f"{'='*80}\n")
 
             for i, account in enumerate(accounts, 1):
