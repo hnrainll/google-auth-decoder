@@ -1,0 +1,16 @@
+[project]
+name = "google-auth-decoder"
+version = "0.1.0"
+description = "Decode Google Authenticator migration URLs and convert to standard TOTP/HOTP format"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+ga-decoder = "ga_decoder:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ga_decoder.py"]
