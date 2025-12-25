@@ -3,7 +3,9 @@ name = "google-auth-decoder"
 version = "0.1.0"
 description = "Decode Google Authenticator migration URLs and convert to standard TOTP/HOTP format"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "qrcode[pil]>=7.4.2",
+]
 
 [project.scripts]
 ga-decoder = "ga_decoder:main"

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.12"
-# dependencies = []
+# dependencies = [
+#     "qrcode[pil]>=7.4.2",
+# ]
 # ///
 
 """
@@ -15,8 +17,9 @@ import sys
 import base64
 import argparse
 from urllib.parse import urlparse, parse_qs, quote
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from io import BytesIO
+from pathlib import Path
 
 
 class ProtobufParser:
@@ -296,6 +299,74 @@ def decode_migration_data(binary_data: bytes) -> List[Dict[str, Any]]:
     return accounts
 
 
+def generate_qr_code(otpauth_url: str, output_path: Optional[Path] = None) -> Optional[str]:
+    """
+    Generate a QR code from an otpauth:// URL.
+
+    Args:
+        otpauth_url: The otpauth:// URL to encode
+        output_path: Path to save the QR code image. If None, returns base64-encoded PNG.
+
+    Returns:
+        Path to saved file if output_path provided, otherwise base64-encoded PNG string
+    """
+    import qrcode
+    from io import BytesIO
+
+    # Create QR code instance
+    qr = qrcode.QRCode(
+        version=1,  # Auto-adjust size
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+
+    qr.add_data(otpauth_url)
+    qr.make(fit=True)
+
+    # Create the QR code image
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    if output_path:
+        # Save to file
+        img.save(output_path)
+        return str(output_path)
+    else:
+        # Return base64-encoded PNG
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        buffer.seek(0)
+        img_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+        return img_base64
+
+
+def sanitize_filename(name: str, issuer: str = "") -> str:
+    """
+    Create a safe filename from account name and issuer.
+
+    Args:
+        name: Account name
+        issuer: Account issuer
+
+    Returns:
+        Sanitized filename
+    """
+    import re
+
+    # Combine issuer and name
+    if issuer:
+        full_name = f"{issuer}_{name}" if name else issuer
+    else:
+        full_name = name or "account"
+
+    # Remove or replace invalid characters
+    safe_name = re.sub(r'[^\w\-_\. ]', '_', full_name)
+    safe_name = re.sub(r'\s+', '_', safe_name)
+    safe_name = safe_name.strip('_')
+
+    return safe_name[:100]  # Limit length
+
+
 def main():
     """Main entry point for the script."""
     parser = argparse.ArgumentParser(
@@ -305,6 +376,8 @@ def main():
 Examples:
   %(prog)s "otpauth-migration://offline?data=..."
   %(prog)s --json "otpauth-migration://offline?data=..."
+  %(prog)s --qr "otpauth-migration://offline?data=..."
+  %(prog)s --qr --qr-dir ./my-qrcodes "otpauth-migration://offline?data=..."
         """
     )
     parser.add_argument(
@@ -315,6 +388,17 @@ Examples:
         "--json",
         action="store_true",
         help="Output results in JSON format"
+    )
+    parser.add_argument(
+        "--qr",
+        action="store_true",
+        help="Generate QR code images for each account"
+    )
+    parser.add_argument(
+        "--qr-dir",
+        type=Path,
+        default=Path("qrcodes"),
+        help="Directory to save QR code images (default: ./qrcodes)"
     )
 
     args = parser.parse_args()
@@ -328,14 +412,37 @@ Examples:
             print("No accounts found in the migration data.", file=sys.stderr)
             return 1
 
+        # Generate QR codes if requested
+        qr_files = {}
+        if args.qr:
+            # Create output directory
+            args.qr_dir.mkdir(parents=True, exist_ok=True)
+
+            for i, account in enumerate(accounts, 1):
+                otpauth_url = generate_otpauth_url(account)
+                filename = sanitize_filename(account['name'], account['issuer'])
+                qr_path = args.qr_dir / f"{filename}.png"
+
+                # Handle duplicate filenames
+                if qr_path.exists():
+                    qr_path = args.qr_dir / f"{filename}_{i}.png"
+
+                generate_qr_code(otpauth_url, qr_path)
+                qr_files[i] = qr_path
+
+            print(f"\nGenerated {len(qr_files)} QR code(s) in: {args.qr_dir.absolute()}")
+
         if args.json:
             import json
             output = []
-            for account in accounts:
-                output.append({
+            for i, account in enumerate(accounts, 1):
+                entry = {
                     **account,
                     "otpauth_url": generate_otpauth_url(account)
-                })
+                }
+                if i in qr_files:
+                    entry["qr_code_path"] = str(qr_files[i])
+                output.append(entry)
             print(json.dumps(output, indent=2, ensure_ascii=False))
         else:
             # Pretty print the results
@@ -357,6 +464,10 @@ Examples:
 
                 otpauth_url = generate_otpauth_url(account)
                 print(f"  URL:       {otpauth_url}")
+
+                if i in qr_files:
+                    print(f"  QR Code:   {qr_files[i]}")
+
                 print()
 
         return 0
