@@ -29,6 +29,3 @@ qrcodes/
 test_*.py
 *_test.py
 example_url.txt
-
-# UV
-uv.lock
